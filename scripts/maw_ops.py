@@ -261,16 +261,37 @@ def _get_log_section() -> str:
     return guid
 
 
+def _build_task_description(
+    timeline:  str = "",
+    result:    str = "",
+    risks:     str = "",
+    next_step: str = "",
+) -> str:
+    """Build standard MAW task description template."""
+    parts = []
+    if timeline:  parts.append(f"== Timeline ==\n{timeline.strip()}")
+    if result:    parts.append(f"== Result ==\n{result.strip()}")
+    if risks:     parts.append(f"== Potential Issues ==\n{risks.strip()}")
+    if next_step: parts.append(f"== Next ==\n{next_step.strip()}")
+    return "\n\n".join(parts)
+
+
 def maw_log(
     tag:         str,
     what:        str,
     oracle_name: str  = None,
     result:      str  = "",
+    timeline:    str  = "",
+    risks:       str  = "",
+    next_step:   str  = "",
 ) -> str:
-    """Quick log — create in Log YYYY/MM section + immediately complete."""
+    """Quick log — create in Log YYYY/MM section + immediately complete.
+    Use result/timeline/risks/next_step for structured description."""
     import datetime
     today   = datetime.date.today().strftime("%Y-%m-%d")
-    desc    = f"ทำแล้ว: {result}" if result else ""
+    desc    = _build_task_description(timeline=timeline, result=result, risks=risks, next_step=next_step)
+    if not desc and result:
+        desc = f"== Result ==\n{result}"
     cfg     = get_config()
     tl      = cfg["maw_tasklist_guid"]
     sec     = _get_log_section()  # Log 2026/06 auto-created
