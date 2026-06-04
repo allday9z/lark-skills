@@ -49,22 +49,14 @@ def search_maw_tasks(query: str) -> list:
 # ─── Field helpers ───────────────────────────────────────────────────────────
 
 def _set_maw_fields(guid: str, tag: str, oracle_name: str = "UFicon Oracle"):
-    cfg  = get_config()
-    sf   = cfg.get("maw_stage_field", {})
-    fguid = sf.get("guid")
-    opts  = sf.get("options", {})
+    """Set only ผู้ดำเนินการ (text) — NOT Stage field (shared with DEV JOBS, don't corrupt it).
+    Tag is embedded in summary as [TAG] prefix instead."""
+    cfg    = get_config()
     f_exec = cfg.get("maw_executor_field")
-
-    cf = []
-    opt_guid = opts.get(tag.upper())
-    if fguid and opt_guid:
-        cf.append({"guid": fguid, "single_select_value": opt_guid})
-    if f_exec:
-        cf.append({"guid": f_exec, "text_value": oracle_name})
-    if not cf:
+    if not f_exec:
         return
     _api("PATCH", f"/task/v2/tasks/{guid}", {
-        "task": {"custom_fields": cf},
+        "task": {"custom_fields": [{"guid": f_exec, "text_value": oracle_name}]},
         "update_fields": ["custom_fields"]
     })
 
