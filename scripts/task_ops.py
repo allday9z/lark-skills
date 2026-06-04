@@ -181,3 +181,53 @@ def complete_task(guid: str) -> bool:
         "update_fields": ["completed_at"],
     })
     return r.get("code") == 0
+
+
+# ─── Result logging (sub-task + description append) ──────────────────────────
+
+def log_result(
+    task_guid:   str,
+    result_text: str,
+    oracle_name: str = "UFicon Oracle",
+    date_str:    str = None,
+) -> str:
+    """Log work result without editing original task title.
+    Creates a completed sub-task + appends to description.
+    Returns sub-task guid.
+    """
+    import datetime
+    cfg = get_config()
+    tl  = cfg["tasklist_guid"]
+    today = date_str or datetime.date.today().strftime("%Y-%m-%d")
+
+    # 1. Append result to description (don't replace)
+    r_get = _api("GET", f"/task/v2/tasks/{task_guid}")
+    cur   = r_get.get("data",{}).get("task",{}).get("description","")
+    stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    appended = cur + f"\n\n---\n✅ Result ({stamp} by {oracle_name}):\n{result_text}"
+    _api("PATCH", f"/task/v2/tasks/{task_guid}", {
+        "task": {"description": appended},
+        "update_fields": ["description"]
+    })
+
+    # 2. Create completed sub-task as work log
+    sub = _api("POST", "/task/v2/tasks", {
+        "summary":          f"✅ Result — {result_text[:60]}",
+        "description":      f"Logged by: {oracle_name}\nDate: {stamp}\n\n{result_text}",
+        "tasklists":        [{"tasklist_guid": tl, "section_guid":
+                               _api("GET", f"/task/v2/tasks/{task_guid}")
+                               .get("data",{}).get("task",{}).get("tasklists",[{}])[0]
+                               .get("section_guid","")
+                             }],
+        "parent_task_guid": task_guid,
+        "start": {"timestamp": str(_ts(today)), "is_all_day": True},
+        "due":   {"timestamp": str(_ts(today)), "is_all_day": True},
+    })
+    sub_guid = sub.get("data",{}).get("task",{}).get("guid")
+    if sub_guid:
+        ts_ms = int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1000)
+        _api("PATCH", f"/task/v2/tasks/{sub_guid}", {
+            "task": {"completed_at": str(ts_ms)},
+            "update_fields": ["completed_at"]
+        })
+    return sub_guid or ""
