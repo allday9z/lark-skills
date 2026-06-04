@@ -46,6 +46,29 @@ def search_maw_tasks(query: str) -> list:
     q = query.lower()
     return [t for t in items if q in t.get("summary","").lower()]
 
+# ─── Field helpers ───────────────────────────────────────────────────────────
+
+def _set_maw_fields(guid: str, tag: str, oracle_name: str = "UFicon Oracle"):
+    cfg  = get_config()
+    sf   = cfg.get("maw_stage_field", {})
+    fguid = sf.get("guid")
+    opts  = sf.get("options", {})
+    f_exec = cfg.get("maw_executor_field")
+
+    cf = []
+    opt_guid = opts.get(tag.upper())
+    if fguid and opt_guid:
+        cf.append({"guid": fguid, "single_select_value": opt_guid})
+    if f_exec:
+        cf.append({"guid": f_exec, "text_value": oracle_name})
+    if not cf:
+        return
+    _api("PATCH", f"/task/v2/tasks/{guid}", {
+        "task": {"custom_fields": cf},
+        "update_fields": ["custom_fields"]
+    })
+
+
 # ─── MAW Task CRUD ────────────────────────────────────────────────────────────
 
 def maw_create(
@@ -112,15 +135,81 @@ def maw_start(guid: str) -> bool:
     _api("DELETE", f"/task/v2/tasks/{guid}")
     return new_guid
 
-def maw_done(guid: str) -> bool:
-    """Complete task and move to Done section."""
-    import datetime
-    ts = int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1000)
-    r = _api("PATCH", f"/task/v2/tasks/{guid}", {
-        "task": {"completed_at": str(ts)},
-        "update_fields": ["completed_at"],
+def maw_done(guid: str, tag: str = None, oracle_name: str = "UFicon Oracle") -> str:
+    """Complete task → move to Log YYYY/MM section. Returns new guid."""
+    import datetime as _dt
+    cfg = get_config()
+    tl  = cfg["maw_tasklist_guid"]
+    sec = _get_log_section()
+    uid = cfg.get("assignee_user_id")
+
+    # Get current task
+    r = _api("GET", f"/task/v2/tasks/{guid}")
+    t = r.get("data",{}).get("task",{})
+    if not t:
+        return guid
+
+    # Detect tag from summary if not given
+    if not tag:
+        summary = t.get("summary","")
+        if summary.startswith("[") and "]" in summary:
+            tag = summary[1:summary.index("]")]
+        else:
+            tag = "NEW"
+
+    body = {
+        "summary":     t.get("summary",""),
+        "description": t.get("description",""),
+        "tasklists":   [{"tasklist_guid": tl, "section_guid": sec}],
+    }
+    if t.get("start"): body["start"] = t["start"]
+    if t.get("due"):   body["due"]   = t["due"]
+    if uid: body["members"] = [{"id": uid, "role": "assignee", "type": "user"}]
+
+    new = _api("POST", "/task/v2/tasks", body)
+    new_guid = new.get("data",{}).get("task",{}).get("guid")
+    if not new_guid:
+        return guid
+
+    _set_maw_fields(new_guid, tag, oracle_name)
+    ts_ms = int(_dt.datetime.now(_dt.timezone.utc).timestamp() * 1000)
+    _api("PATCH", f"/task/v2/tasks/{new_guid}", {
+        "task": {"completed_at": str(ts_ms)}, "update_fields": ["completed_at"]
     })
-    return r.get("code") == 0
+    _api("DELETE", f"/task/v2/tasks/{guid}")
+    return new_guid
+
+def _get_log_section() -> str:
+    """Get or create Log YYYY/MM section for current month."""
+    import datetime
+    cfg  = get_config()
+    tl   = cfg["maw_tasklist_guid"]
+    now  = datetime.datetime.now()
+    key  = f"log_{now.year}_{now.month:02d}"
+    name = f"Log {now.year}/{now.month:02d}"
+
+    # Check if already in config
+    secs = cfg.get("maw_sections", {})
+    if key in secs:
+        return secs[key]
+
+    # Create new log section
+    r = _api("POST", "/task/v2/sections", {
+        "name": name,
+        "resource_type": "tasklist",
+        "resource_id": tl,
+    })
+    guid = r.get("data",{}).get("section",{}).get("guid")
+    if not guid:
+        return cfg["maw_sections"]["done"]  # fallback
+
+    # Save to config
+    import pathlib, json as _json
+    cfg_path = pathlib.Path.home() / ".claude/skills/lark/config.json"
+    cfg["maw_sections"][key] = guid
+    cfg_path.write_text(_json.dumps(cfg, indent=2, ensure_ascii=False))
+    return guid
+
 
 def maw_log(
     tag:         str,
@@ -128,12 +217,41 @@ def maw_log(
     oracle_name: str  = None,
     result:      str  = "",
 ) -> str:
-    """Quick log — create + immediately complete task (for already-done work)."""
+    """Quick log — create in Log YYYY/MM section + immediately complete."""
     import datetime
-    today = datetime.date.today().strftime("%Y-%m-%d")
-    desc  = f"ทำแล้ว: {result}" if result else ""
-    guid  = maw_create(tag, what, desc, oracle_name, start=today, due=today)
-    maw_done(guid)
+    today   = datetime.date.today().strftime("%Y-%m-%d")
+    desc    = f"ทำแล้ว: {result}" if result else ""
+    cfg     = get_config()
+    tl      = cfg["maw_tasklist_guid"]
+    sec     = _get_log_section()  # Log 2026/06 auto-created
+    uid     = cfg.get("assignee_user_id")
+    summary = format_summary(tag, what, oracle_name)
+
+    body = {
+        "summary":     summary,
+        "description": desc,
+        "tasklists":   [{"tasklist_guid": tl, "section_guid": sec}],
+        "start": {"timestamp": str(_ts(today)), "is_all_day": True},
+        "due":   {"timestamp": str(_ts(today)), "is_all_day": True},
+    }
+    if uid:
+        body["members"] = [{"id": uid, "role": "assignee", "type": "user"}]
+
+    r = _api("POST", "/task/v2/tasks", body)
+    guid = r.get("data",{}).get("task",{}).get("guid")
+    if not guid:
+        sys.exit(f"❌ maw_log create failed: {r.get('msg','?')}")
+
+    # Set Stage + ผู้ดำเนินการ
+    _set_maw_fields(guid, tag, oracle_name or "UFicon Oracle")
+
+    # Complete immediately
+    import datetime as _dt
+    ts_ms = int(_dt.datetime.now(_dt.timezone.utc).timestamp() * 1000)
+    _api("PATCH", f"/task/v2/tasks/{guid}", {
+        "task": {"completed_at": str(ts_ms)},
+        "update_fields": ["completed_at"]
+    })
     return guid
 
 # ─── CLI ──────────────────────────────────────────────────────────────────────
