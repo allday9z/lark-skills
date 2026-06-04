@@ -75,7 +75,7 @@ def create_task(
     if parent_guid:
         body["parent_task_guid"] = parent_guid
 
-    r = _api("POST", "/task/v2/tasks", body)
+    r = _api("POST", f"/task/v2/tasks/{parent_guid}/subtasks", body)
     guid = r.get("data", {}).get("task", {}).get("guid")
     if not guid:
         sys.exit(f"❌ create_task failed: {r.get('msg','unknown error')}")
@@ -258,7 +258,7 @@ def create_subtask(
     # No "tasklists" — sub-task only visible under parent, not in main list
 
     r = _api("POST", "/task/v2/tasks", body)
-    guid = r.get("data",{}).get("task",{}).get("guid")
+    guid = r.get("data",{}).get("subtask",{}).get("guid") or r.get("data",{}).get("task",{}).get("guid")
     if not guid:
         import sys; sys.exit(f"❌ create_subtask failed: {r.get('msg','?')}")
 
