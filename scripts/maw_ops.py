@@ -64,19 +64,36 @@ TAG_TO_STAGE = {
     "REFACTOR": "9fcf9d13-e7e9-4fd7-970e-b22578ba9085",
 }
 
-def _set_maw_fields(guid: str, tag: str, oracle_name: str = "UFicon Oracle", completed: bool = False):
-    """Set Stage (from [TAG] mapping) + ผู้ดำเนินการ text field."""
+# งาน field — Oracle work status (prevents collision between agents)
+WORK_STATUS = {
+    "รอเปิดงาน": "cc551e9f-08c1-413a-aee5-c1866bb331ae",  # Todo / not started
+    "ทำงาน":     "9cbcdfc4-73a5-4449-9275-e5c46c56c5fa",  # In Progress
+    "กำลังแก้ไข":"1358b82a-28aa-4ef3-a228-58e383c1a750",  # Fixing
+    "ทดสอบ":     "e4ef178c-9eb4-4313-8b74-6d57b81f3cb7",  # Testing
+    "เสร็จงาน":  "c650a929-ce78-433e-8b43-3bccdb09f44d",  # Done
+}
+F_WORK = "6ecd0299-552a-4d46-9d36-9018c8d9d30a"
+
+
+def _set_maw_fields(guid: str, tag: str, oracle_name: str = "UFicon Oracle",
+                    completed: bool = False, work_status: str = None):
+    """Set งาน (work status) + ผู้ดำเนินการ for MAW task.
+    Stage field NOT set here — shared field, set separately if needed.
+    """
     cfg    = get_config()
     f_exec = cfg.get("maw_executor_field")
-    sf     = cfg.get("maw_stage_field", {})
-    f_stage = sf.get("guid")
+    wf     = cfg.get("maw_work_field", {})
+    f_work = wf.get("guid", F_WORK)
+    wo     = wf.get("options", WORK_STATUS)
 
-    stage_guid = "bbf8574e-ae62-4848-9c60-296b98135fb8" if completed \
-                 else TAG_TO_STAGE.get(tag.upper(), "9fcf9d13-e7e9-4fd7-970e-b22578ba9085")
+    # Auto-determine work_status
+    if work_status is None:
+        work_status = "เสร็จงาน" if completed else "รอเปิดงาน"
+    work_guid = wo.get(work_status, wo.get("รอเปิดงาน",""))
 
     cf = []
-    if f_stage:
-        cf.append({"guid": f_stage, "single_select_value": stage_guid})
+    if f_work and work_guid:
+        cf.append({"guid": f_work, "single_select_value": work_guid})
     if f_exec:
         cf.append({"guid": f_exec, "text_value": oracle_name})
     if not cf:
@@ -121,7 +138,22 @@ def maw_create(
     guid = r.get("data",{}).get("task",{}).get("guid")
     if not guid:
         sys.exit(f"❌ maw_create failed: {r.get('msg','?')}")
+    # Set งาน=รอเปิดงาน + ผู้ดำเนินการ
+    _set_maw_fields(guid, tag, assignee if isinstance(assignee, str) else oracle_name,
+                    work_status="รอเปิดงาน")
     return guid
+
+def maw_fixing(guid: str, oracle_name: str = "UFicon Oracle") -> bool:
+    """Mark task as กำลังแก้ไข — another Oracle can see this is being edited."""
+    _set_maw_fields(guid, "FIX", oracle_name, work_status="กำลังแก้ไข")
+    return True
+
+
+def maw_testing(guid: str, oracle_name: str = "UFicon Oracle") -> bool:
+    """Mark task as ทดสอบ."""
+    _set_maw_fields(guid, "TEST", oracle_name, work_status="ทดสอบ")
+    return True
+
 
 def maw_start(guid: str) -> bool:
     """Move task to In Progress section."""
