@@ -193,3 +193,31 @@ api("GET", f"/task/v2/custom_fields?resource_type=tasklist&resource_id={TL}&page
   "tokens_path": "~/.claude/skills/lark/tokens.json"
 }
 ```
+
+## MAW (Multi-Agent Workflow) Tasks
+
+All Oracle agents log their work here: `cf47381f-a382-49ca-a794-b68331a44cf1`
+
+```python
+from maw_ops import maw_create, maw_start, maw_done, maw_log
+
+# งานกำลังทำ
+guid = maw_create("[FEATURE]", "Build PDP API", oracle_name="uficon-oracle",
+                  start="2026-06-09", due="2026-06-14")
+maw_start(guid)   # → In Progress section
+
+# งานเสร็จแล้ว (สร้าง + complete ทันที)
+maw_log("[FIX]", "Lark token auto-refresh", oracle_name="uficon-oracle")
+```
+
+**Summary format:** `[TAG] description (oracle-name)`
+
+Tags: `BUG FIX FEATURE ADD NEW CREATE DEL DB INFRA DOC REFACTOR TEST`
+
+### Which Tasklist?
+
+| งาน | Tasklist |
+|-----|---------|
+| Dev work for M2Dev | DEV JOBS (`8411e88a`) |
+| Oracle agent work (fixes, infra, skills) | MAW (`cf47381f`) |
+| Bug fixes in UFicon projects | DEV JOBS (Fix prefix) + MAW ([BUG] tag) |
