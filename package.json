@@ -1,0 +1,22 @@
+{
+  "name": "@allday9z/lark-skills",
+  "version": "1.0.0",
+  "description": "Lark Task PM skill for Claude Code — create/update/move tasks with auto-refresh token",
+  "main": "bin/install.js",
+  "bin": {
+    "lark-skills": "bin/install.js"
+  },
+  "scripts": {
+    "postinstall": "node bin/install.js"
+  },
+  "keywords": ["claude-skills", "lark", "project-management", "task-management"],
+  "author": "allday9z",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/allday9z/lark-skills"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}
