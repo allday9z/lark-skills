@@ -48,15 +48,41 @@ def search_maw_tasks(query: str) -> list:
 
 # ─── Field helpers ───────────────────────────────────────────────────────────
 
-def _set_maw_fields(guid: str, tag: str, oracle_name: str = "UFicon Oracle"):
-    """Set only ผู้ดำเนินการ (text) — NOT Stage field (shared with DEV JOBS, don't corrupt it).
-    Tag is embedded in summary as [TAG] prefix instead."""
+TAG_TO_STAGE = {
+    "FIX":      "244c55c7-f154-4f23-8141-f413562f8e92",  # Fix Bug
+    "BUG":      "244c55c7-f154-4f23-8141-f413562f8e92",  # Fix Bug
+    "DOC":      "3b425a44-a353-4eae-b575-db098a1db788",  # Planning
+    "TEST":     "211a1a4a-90b2-41b1-85a1-81055c3d7dd3",  # Testing
+    "DONE":     "bbf8574e-ae62-4848-9c60-296b98135fb8",  # Done
+    # All others → Dev
+    "ADD":      "9fcf9d13-e7e9-4fd7-970e-b22578ba9085",
+    "NEW":      "9fcf9d13-e7e9-4fd7-970e-b22578ba9085",
+    "CREATE":   "9fcf9d13-e7e9-4fd7-970e-b22578ba9085",
+    "FEATURE":  "9fcf9d13-e7e9-4fd7-970e-b22578ba9085",
+    "DB":       "9fcf9d13-e7e9-4fd7-970e-b22578ba9085",
+    "INFRA":    "9fcf9d13-e7e9-4fd7-970e-b22578ba9085",
+    "REFACTOR": "9fcf9d13-e7e9-4fd7-970e-b22578ba9085",
+}
+
+def _set_maw_fields(guid: str, tag: str, oracle_name: str = "UFicon Oracle", completed: bool = False):
+    """Set Stage (from [TAG] mapping) + ผู้ดำเนินการ text field."""
     cfg    = get_config()
     f_exec = cfg.get("maw_executor_field")
-    if not f_exec:
+    sf     = cfg.get("maw_stage_field", {})
+    f_stage = sf.get("guid")
+
+    stage_guid = "bbf8574e-ae62-4848-9c60-296b98135fb8" if completed \
+                 else TAG_TO_STAGE.get(tag.upper(), "9fcf9d13-e7e9-4fd7-970e-b22578ba9085")
+
+    cf = []
+    if f_stage:
+        cf.append({"guid": f_stage, "single_select_value": stage_guid})
+    if f_exec:
+        cf.append({"guid": f_exec, "text_value": oracle_name})
+    if not cf:
         return
     _api("PATCH", f"/task/v2/tasks/{guid}", {
-        "task": {"custom_fields": [{"guid": f_exec, "text_value": oracle_name}]},
+        "task": {"custom_fields": cf},
         "update_fields": ["custom_fields"]
     })
 
@@ -163,7 +189,7 @@ def maw_done(guid: str, tag: str = None, oracle_name: str = "UFicon Oracle") -> 
     if not new_guid:
         return guid
 
-    _set_maw_fields(new_guid, tag, oracle_name)
+    _set_maw_fields(new_guid, tag, oracle_name, completed=True)
     ts_ms = int(_dt.datetime.now(_dt.timezone.utc).timestamp() * 1000)
     _api("PATCH", f"/task/v2/tasks/{new_guid}", {
         "task": {"completed_at": str(ts_ms)}, "update_fields": ["completed_at"]
