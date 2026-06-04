@@ -231,3 +231,53 @@ def log_result(
             "update_fields": ["completed_at"]
         })
     return sub_guid or ""
+
+
+def create_subtask(
+    parent_guid: str,
+    summary:     str,
+    description: str = "",
+    start:       str = None,
+    due:         str = None,
+    p4p:         str = "P2",
+    stage:       str = "Dev",
+    project:     str = None,
+) -> str:
+    """Create a sub-task under parent — NO tasklists, only shows in parent detail panel."""
+    cfg = get_config()
+    uid = cfg.get("assignee_user_id")
+
+    body = {
+        "summary":          summary,
+        "description":      description,
+        "parent_task_guid": parent_guid,
+    }
+    if start: body["start"] = {"timestamp": str(_ts(start)), "is_all_day": True}
+    if due:   body["due"]   = {"timestamp": str(_ts(due)),   "is_all_day": True}
+    if uid:   body["members"] = [{"id": uid, "role": "assignee", "type": "user"}]
+    # No "tasklists" — sub-task only visible under parent, not in main list
+
+    r = _api("POST", "/task/v2/tasks", body)
+    guid = r.get("data",{}).get("task",{}).get("guid")
+    if not guid:
+        import sys; sys.exit(f"❌ create_subtask failed: {r.get('msg','?')}")
+
+    # Set custom fields if available
+    P4P_MAP = {"P1":"682cab3b","P2":"23dda073","P3":"53d50000"}
+    STAGE_MAP = {"Dev":"9fcf9d13","Fix Bug":"244c55c7","UAT":"82a47c17","Deploy":"8a74507e","Done":"bbf8574e","Planning":"3b425a44","Testing":"211a1a4a"}
+    cf_data = cfg.get("custom_fields", {})
+    cf = []
+    if p4p and "priority_4p" in cf_data:
+        opt = P4P_MAP.get(p4p)
+        if opt: cf.append({"guid": cf_data["priority_4p"]["guid"], "single_select_value": opt})
+    if stage and "stage" in cf_data:
+        opt = STAGE_MAP.get(stage)
+        if opt: cf.append({"guid": cf_data["stage"]["guid"], "single_select_value": opt})
+    if project and "project" in cf_data:
+        opt = cf_data["project"]["options"].get(project)
+        if opt: cf.append({"guid": cf_data["project"]["guid"], "single_select_value": opt})
+    if cf:
+        _api("PATCH", f"/task/v2/tasks/{guid}", {
+            "task": {"custom_fields": cf}, "update_fields": ["custom_fields"]
+        })
+    return guid
